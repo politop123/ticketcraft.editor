@@ -27,6 +27,7 @@ const exportMode = ref<'template' | 'rendered'>('rendered')
 const exportedHtml = ref('')
 const history = ref<TicketTemplate[]>([])
 const future = ref<TicketTemplate[]>([])
+const clipboardElement = ref<TicketElement | null>(null)
 
 const selectedElement = computed(() => template.value.elements.find((item) => item.id === selectedId.value) ?? null)
 
@@ -165,6 +166,27 @@ const duplicateSelected = () => {
   selectedId.value = duplicate.id
 }
 
+const copySelected = () => {
+  if (!selectedElement.value) return
+  clipboardElement.value = deepClone(selectedElement.value)
+}
+
+const pasteClipboard = () => {
+  if (!clipboardElement.value) return
+  const duplicate = deepClone(clipboardElement.value)
+  duplicate.id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 12)
+  duplicate.label = `${duplicate.label} copy`
+  duplicate.x = clamp(duplicate.x + 20, 0, Math.max(0, template.value.width - duplicate.width))
+  duplicate.y = clamp(duplicate.y + 20, 0, Math.max(0, template.value.height - duplicate.height))
+  duplicate.zIndex = Math.max(...template.value.elements.map((item) => item.zIndex), 0) + 1
+
+  const next = cloneTemplate(template.value)
+  next.elements.push(duplicate)
+  applyTemplateState(next, 'immediate')
+  selectedId.value = duplicate.id
+  clipboardElement.value = deepClone(duplicate)
+}
+
 const addElement = (kind: TicketElement['kind']) => {
   const element = createElement(kind)
   element.x = Math.round(template.value.width / 2 - element.width / 2)
@@ -262,28 +284,62 @@ watch([template, sampleData, zoom, activeTab, locale], schedulePersist, { deep: 
 
 const onKeyDown = (event: KeyboardEvent) => {
   const target = event.target as HTMLElement | null
-  const isTypingTarget = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+  const isTypingTarget = Boolean(
+    target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)
+  )
+  const hasModifier = event.metaKey || event.ctrlKey
 
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+  if (isTypingTarget) {
+    // Do not hijack native editing shortcuts inside controls.
+    if (event.key === 'Escape' && exportOpen.value) {
+      event.preventDefault()
+      exportOpen.value = false
+    }
+    return
+  }
+
+  if (hasModifier && event.key.toLowerCase() === 'z') {
     event.preventDefault()
     if (event.shiftKey) redo()
     else undo()
     return
   }
 
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'y') {
+  if (hasModifier && event.key.toLowerCase() === 'y') {
     event.preventDefault()
     redo()
     return
   }
 
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd' && selectedElement.value) {
+  if (hasModifier && event.key.toLowerCase() === 'd' && selectedElement.value) {
     event.preventDefault()
     duplicateSelected()
     return
   }
 
-  if (isTypingTarget) return
+  if (hasModifier && event.key.toLowerCase() === 'c' && selectedElement.value) {
+    event.preventDefault()
+    copySelected()
+    return
+  }
+
+  if (hasModifier && event.key.toLowerCase() === 'v' && clipboardElement.value) {
+    event.preventDefault()
+    pasteClipboard()
+    return
+  }
+
+  if (hasModifier && event.key.toLowerCase() === 'a') {
+    event.preventDefault()
+    selectedId.value = template.value.elements.at(-1)?.id ?? null
+    return
+  }
+
+  if (event.key === 'Escape') {
+    selectedId.value = null
+    return
+  }
+
   if (!selectedElement.value) return
 
   if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -294,10 +350,18 @@ const onKeyDown = (event: KeyboardEvent) => {
 
   const step = event.shiftKey ? 10 : 1
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) event.preventDefault()
-  if (event.key === 'ArrowLeft') patchElement({ id: selectedElement.value.id, patch: { x: selectedElement.value.x - step } })
-  if (event.key === 'ArrowRight') patchElement({ id: selectedElement.value.id, patch: { x: selectedElement.value.x + step } })
-  if (event.key === 'ArrowUp') patchElement({ id: selectedElement.value.id, patch: { y: selectedElement.value.y - step } })
-  if (event.key === 'ArrowDown') patchElement({ id: selectedElement.value.id, patch: { y: selectedElement.value.y + step } })
+  if (event.key === 'ArrowLeft') {
+    patchElement({ id: selectedElement.value.id, patch: { x: clamp(selectedElement.value.x - step, 0, template.value.width - selectedElement.value.width) } })
+  }
+  if (event.key === 'ArrowRight') {
+    patchElement({ id: selectedElement.value.id, patch: { x: clamp(selectedElement.value.x + step, 0, template.value.width - selectedElement.value.width) } })
+  }
+  if (event.key === 'ArrowUp') {
+    patchElement({ id: selectedElement.value.id, patch: { y: clamp(selectedElement.value.y - step, 0, template.value.height - selectedElement.value.height) } })
+  }
+  if (event.key === 'ArrowDown') {
+    patchElement({ id: selectedElement.value.id, patch: { y: clamp(selectedElement.value.y + step, 0, template.value.height - selectedElement.value.height) } })
+  }
 }
 
 onMounted(() => {
