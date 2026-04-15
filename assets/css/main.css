@@ -330,6 +330,7 @@ select {
   position: relative;
   overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.06);
+  touch-action: none;
 }
 
 .ticket-stage__background,
@@ -352,6 +353,7 @@ select {
 
 .ticket-element {
   user-select: none;
+  touch-action: none;
 }
 
 .ticket-element__content {
@@ -700,4 +702,5 @@ select {
 
 .object-contain {
   object-fit: contain;
+  -webkit-user-drag: none;
 }

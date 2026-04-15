@@ -37,6 +37,7 @@ const backgroundStyle = computed(() => ({
 }))
 
 const interaction = ref<null | {
+  pointerId: number
   id: string
   mode: 'move' | 'resize'
   startX: number
@@ -158,10 +159,12 @@ const qrImageStyle = (element: Extract<TicketElement, { kind: 'qr' }>) => {
 
 const start = (event: PointerEvent, element: TicketElement, mode: 'move' | 'resize') => {
   event.stopPropagation()
+  event.preventDefault()
   emit('select', element.id)
   if (element.locked) return
 
   interaction.value = {
+    pointerId: event.pointerId,
     id: element.id,
     mode,
     startX: event.clientX,
@@ -172,12 +175,19 @@ const start = (event: PointerEvent, element: TicketElement, mode: 'move' | 'resi
     initialHeight: element.height
   }
 
+  const target = event.currentTarget
+  if (target instanceof Element && 'setPointerCapture' in target) {
+    target.setPointerCapture(event.pointerId)
+  }
+
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
 }
 
 const onMove = (event: PointerEvent) => {
   if (!interaction.value) return
+  if (event.pointerId !== interaction.value.pointerId) return
   const element = getElement(interaction.value.id)
   if (!element) return
 
@@ -197,15 +207,34 @@ const onMove = (event: PointerEvent) => {
   emit('patch', { id: element.id, patch: { width: nextWidth, height: nextHeight } })
 }
 
-const onUp = () => {
+const onUp = (event?: PointerEvent) => {
+  if (event && interaction.value && event.pointerId !== interaction.value.pointerId) return
   interaction.value = null
   window.removeEventListener('pointermove', onMove)
   window.removeEventListener('pointerup', onUp)
+  window.removeEventListener('pointercancel', onUp)
 }
 
+const cancelInteraction = () => {
+  if (!interaction.value) return
+  onUp()
+}
+
+const onVisibility = () => {
+  if (document.visibilityState !== 'visible') cancelInteraction()
+}
+
+onMounted(() => {
+  window.addEventListener('blur', cancelInteraction)
+  document.addEventListener('visibilitychange', onVisibility)
+})
+
 onBeforeUnmount(() => {
+  window.removeEventListener('blur', cancelInteraction)
+  document.removeEventListener('visibilitychange', onVisibility)
   window.removeEventListener('pointermove', onMove)
   window.removeEventListener('pointerup', onUp)
+  window.removeEventListener('pointercancel', onUp)
   if (refreshTimer) clearTimeout(refreshTimer)
 })
 </script>
@@ -261,7 +290,7 @@ onBeforeUnmount(() => {
               }"
             >
               <div class="qr-tile__image" :style="qrImageStyle(element)">
-                <img :src="qrMap[element.id]" alt="QR code" class="h-full w-full object-contain" />
+                <img :src="qrMap[element.id]" alt="QR code" class="h-full w-full object-contain" draggable="false" />
               </div>
               <div v-if="element.showCaption" class="qr-caption">DYNAMIC QR</div>
             </div>
